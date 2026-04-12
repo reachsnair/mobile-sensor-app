@@ -273,9 +273,14 @@
       <option value="shake5">Shake phone 5 times</option>
       <option value="shake10">Shake phone 10 times</option>
       <option value="walk10">Walk 10 steps</option>
+      <option value="tap3">Tap phone 3 times</option>
+      <option value="still5">Hold still for 5 seconds</option>
       <option value="tilt">Tilt left then right</option>
+      <option value="nod3">Nod yes 3 times</option>
       <option value="facedown">Flip phone face-down</option>
       <option value="rotate360">Rotate phone 360°</option>
+      <option value="halfturn">Half turn (180°)</option>
+      <option value="jump1">Jump once</option>
     </select>
     <div class="row">
       <label>Timeout (seconds):</label>
@@ -306,12 +311,17 @@
 <script>
 // ── Activities ─────────────────────────────────────────
 const ACTIVITIES = {
-  shake5:    { label: 'Shake your phone 5 times',  target: 5,   unit: 'shakes', sensors: ['motion'] },
-  shake10:   { label: 'Shake your phone 10 times', target: 10,  unit: 'shakes', sensors: ['motion'] },
-  walk10:    { label: 'Walk 10 steps',              target: 10,  unit: 'steps',  sensors: ['motion'] },
-  tilt:      { label: 'Tilt LEFT then RIGHT',       target: 2,   unit: 'tilts',  sensors: ['orientation'] },
-  facedown:  { label: 'Flip phone face-down',       target: 1,   unit: 'flip',   sensors: ['orientation'] },
-  rotate360: { label: 'Rotate phone 360°',          target: 360, unit: '°',      sensors: ['orientation'] },
+  shake5:    { label: 'Shake your phone 5 times',   target: 5,   unit: 'shakes', sensors: ['motion'] },
+  shake10:   { label: 'Shake your phone 10 times',  target: 10,  unit: 'shakes', sensors: ['motion'] },
+  walk10:    { label: 'Walk 10 steps',               target: 10,  unit: 'steps',  sensors: ['motion'] },
+  tap3:      { label: 'Tap phone 3 times',           target: 3,   unit: 'taps',   sensors: ['motion'] },
+  still5:    { label: 'Hold phone still for 5 sec',  target: 5,   unit: 'sec',    sensors: ['motion'] },
+  tilt:      { label: 'Tilt LEFT then RIGHT',        target: 2,   unit: 'tilts',  sensors: ['orientation'] },
+  nod3:      { label: 'Nod yes 3 times',             target: 3,   unit: 'nods',   sensors: ['orientation'] },
+  facedown:  { label: 'Flip phone face-down',        target: 1,   unit: 'flip',   sensors: ['orientation'] },
+  rotate360: { label: 'Rotate phone 360°',           target: 360, unit: '°',      sensors: ['orientation'] },
+  halfturn:  { label: 'Half turn (180°)',            target: 180, unit: '°',      sensors: ['orientation'] },
+  jump1:     { label: 'Jump once',                   target: 1,   unit: 'jump',   sensors: ['motion'] },
 };
 
 // ── State ──────────────────────────────────────────────
@@ -320,6 +330,11 @@ let secondsLeft = 60, totalSecs = 60, sessionStart = null;
 let motionCb = null, orientCb = null;
 let shakeCount = 0, lastShakeTime = 0, lastAccel = null;
 let stepCount = 0, lastStepTime = 0, lastMagForStep = 0, stepRising = false;
+let tapCount = 0, lastTapTime = 0;
+let stillSeconds = 0, lastMagSnapshot = 9.8, stillInterval = null;
+let nodCount = 0, nodDown = false;
+let jumpPhase = 'waiting', freefallStart = 0;
+let halfTurnRot = 0, halfTurnAlpha = null, halfTurnDone = false;
 let tiltL = false, tiltR = false, faceDown = false;
 let totalRot = 0, lastAlpha = null, rotDone = false;
 
@@ -481,6 +496,12 @@ async function startSession() {
   // ── Reset counters ──
   shakeCount = 0; lastShakeTime = 0; lastAccel = null;
   stepCount = 0; lastStepTime = 0; lastMagForStep = 0; stepRising = false;
+  tapCount = 0; lastTapTime = 0;
+  stillSeconds = 0; lastMagSnapshot = 9.8;
+  if (stillInterval) { clearInterval(stillInterval); stillInterval = null; }
+  nodCount = 0; nodDown = false;
+  jumpPhase = 'waiting'; freefallStart = 0;
+  halfTurnRot = 0; halfTurnAlpha = null; halfTurnDone = false;
   tiltL = false; tiltR = false; faceDown = false;
   totalRot = 0; lastAlpha = null; rotDone = false;
 
@@ -512,23 +533,47 @@ async function startSession() {
     window.addEventListener('devicemotion', verifyOnce);
   }
 
-  if (key === 'walk10') {
-    motionCb = e => onStep(e, act.target);
+  if (['walk10', 'tap3', 'still5', 'jump1'].includes(key)) {
+    motionCb = e => {
+      if (key === 'walk10') onStep(e, act.target);
+      if (key === 'tap3')   onTap(e, act.target);
+      if (key === 'still5') onStillMotion(e);
+      if (key === 'jump1')  onJump(e, act.target);
+    };
     window.addEventListener('devicemotion', motionCb);
-    log('devicemotion listener: attached (step mode)', 'info');
+    log('devicemotion listener: attached', 'info');
     let verified = false;
     const verifyTimer = setTimeout(() => {
       if (!verified) log('WARNING: no devicemotion events received after 3s — sensor may be blocked or unavailable.', 'warn');
     }, 3000);
     const verifyOnce = () => { verified = true; clearTimeout(verifyTimer); log('devicemotion firing ✓', 'event'); window.removeEventListener('devicemotion', verifyOnce); };
     window.addEventListener('devicemotion', verifyOnce);
+
+    if (key === 'still5') {
+      stillInterval = setInterval(() => {
+        if (!active) return;
+        const inRange = lastMagSnapshot >= 9.0 && lastMagSnapshot <= 10.8;
+        if (inRange) {
+          stillSeconds++;
+          log('Still... ' + stillSeconds + 's / ' + act.target + 's (mag: ' + lastMagSnapshot.toFixed(2) + ')', 'data');
+          setProgress(stillSeconds, act.target);
+          if (stillSeconds >= act.target) stopSession('Target completed');
+        } else {
+          if (stillSeconds > 0) log('Moved! Resetting. (mag: ' + lastMagSnapshot.toFixed(2) + ')', 'warn');
+          stillSeconds = 0;
+          setProgress(0, act.target);
+        }
+      }, 1000);
+    }
   }
 
-  if (['tilt','facedown','rotate360'].includes(key)) {
+  if (['tilt', 'facedown', 'rotate360', 'nod3', 'halfturn'].includes(key)) {
     orientCb = e => {
       if (key === 'tilt')      onTilt(e);
       if (key === 'facedown')  onFaceDown(e);
       if (key === 'rotate360') onRotate(e);
+      if (key === 'nod3')      onNod(e, act.target);
+      if (key === 'halfturn')  onHalfTurn(e, act.target);
     };
     window.addEventListener('deviceorientation', orientCb);
     log('deviceorientation listener: attached', 'info');
@@ -556,6 +601,7 @@ function stopSession(reason) {
 
   if (motionCb) { window.removeEventListener('devicemotion', motionCb); motionCb = null; }
   if (orientCb) { window.removeEventListener('deviceorientation', orientCb); orientCb = null; }
+  if (stillInterval) { clearInterval(stillInterval); stillInterval = null; }
 
   // UI: back to setup state
   $('activitySelect').disabled = false;
@@ -628,6 +674,92 @@ function onStep(e, target) {
     if (stepCount >= target) stopSession('Target completed');
   }
   lastMagForStep = mag;
+}
+
+// ── Tap ────────────────────────────────────────────────
+function onTap(e, target) {
+  const a = e.accelerationIncludingGravity;
+  if (!a) return;
+  const {x, y, z} = a;
+  if (!lastAccel) { lastAccel = {x, y, z}; return; }
+  const mag = Math.sqrt((x-lastAccel.x)**2 + (y-lastAccel.y)**2 + (z-lastAccel.z)**2);
+  lastAccel = {x, y, z};
+  const now = Date.now();
+  if (mag > 8 && mag < 18 && now - lastTapTime > 250) {
+    tapCount++;
+    lastTapTime = now;
+    log('TAP #' + tapCount + ' — Δmag: ' + mag.toFixed(2) + ' m/s²', 'event');
+    setProgress(tapCount, target);
+    if (tapCount >= target) stopSession('Target completed');
+  }
+}
+
+// ── Still ──────────────────────────────────────────────
+function onStillMotion(e) {
+  const a = e.accelerationIncludingGravity;
+  if (!a) return;
+  const {x, y, z} = a;
+  lastMagSnapshot = Math.sqrt(x*x + y*y + z*z);
+}
+
+// ── Nod ────────────────────────────────────────────────
+function onNod(e, target) {
+  const b = e.beta;
+  if (b === null) return;
+  if (!nodDown && b > 25) {
+    nodDown = true;
+    log('Nod forward — beta: ' + b.toFixed(1) + '°', 'data');
+  }
+  if (nodDown && b < 5) {
+    nodDown = false;
+    nodCount++;
+    log('NOD #' + nodCount + ' — beta: ' + b.toFixed(1) + '°', 'event');
+    setProgress(nodCount, target);
+    if (nodCount >= target) stopSession('Target completed');
+  }
+}
+
+// ── Jump ───────────────────────────────────────────────
+function onJump(e, target) {
+  const a = e.accelerationIncludingGravity;
+  if (!a) return;
+  const {x, y, z} = a;
+  const mag = Math.sqrt(x*x + y*y + z*z);
+  const now = Date.now();
+  if (jumpPhase === 'waiting' && mag < 4) {
+    jumpPhase = 'freefall';
+    freefallStart = now;
+    log('Freefall — mag: ' + mag.toFixed(2) + ' m/s²', 'data');
+  }
+  if (jumpPhase === 'freefall' && mag > 16 && now - freefallStart > 80) {
+    jumpPhase = 'done';
+    log('JUMP landing — mag: ' + mag.toFixed(2) + ' m/s²', 'event');
+    setProgress(1, target);
+    stopSession('Target completed');
+  }
+  if (jumpPhase === 'freefall' && now - freefallStart > 1200) {
+    jumpPhase = 'waiting';
+    log('Freefall reset (no landing detected)', 'warn');
+  }
+}
+
+// ── Half turn ──────────────────────────────────────────
+function onHalfTurn(e, target) {
+  const a = e.alpha;
+  if (a === null || halfTurnDone) return;
+  if (halfTurnAlpha === null) { halfTurnAlpha = a; return; }
+  let d = a - halfTurnAlpha;
+  if (d > 180) d -= 360;
+  if (d < -180) d += 360;
+  halfTurnRot += Math.abs(d);
+  halfTurnAlpha = a;
+  const deg = Math.min(Math.round(halfTurnRot), 180);
+  setProgress(deg, 180);
+  if (halfTurnRot >= 180 && !halfTurnDone) {
+    halfTurnDone = true;
+    log('180° HALF-TURN complete', 'event');
+    stopSession('Target completed');
+  }
 }
 
 // ── Tilt ───────────────────────────────────────────────
