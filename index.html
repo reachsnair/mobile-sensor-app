@@ -1,0 +1,622 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Motion Lab</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    background: #0d0d14;
+    color: #e0e0f0;
+    padding: 16px;
+    min-height: 100dvh;
+  }
+
+  /* ── Header ── */
+  .header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 14px;
+  }
+  .header-left h1 { font-size: 20px; font-weight: 700; color: #00ff88; }
+  .header-left p  { font-size: 11px; color: #555577; margin-top: 2px; }
+
+  /* ── Timer ring ── */
+  .ring-wrap { position: relative; width: 64px; height: 64px; flex-shrink: 0; }
+  .ring-wrap svg { transform: rotate(-90deg); }
+  .ring-bg   { fill: none; stroke: #222233; stroke-width: 4; }
+  .ring-fill { fill: none; stroke: #00ff88; stroke-width: 4; stroke-linecap: round;
+               stroke-dasharray: 175.9; stroke-dashoffset: 0;
+               transition: stroke-dashoffset 1s linear, stroke 0.4s; }
+  .ring-fill.warn { stroke: #ff4466; }
+  .ring-label {
+    position: absolute; inset: 0;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    line-height: 1;
+  }
+  .ring-num  { font-size: 16px; font-weight: 700; color: #e0e0f0; font-variant-numeric: tabular-nums; }
+  .ring-unit { font-size: 9px; color: #555577; margin-top: 1px; }
+  .ring-num.warn { color: #ff4466; }
+
+  /* ── Cards ── */
+  .card {
+    background: #16161f;
+    border: 1px solid #222233;
+    border-radius: 12px;
+    padding: 14px;
+    margin-bottom: 12px;
+  }
+  .card-label {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    color: #555577;
+    margin-bottom: 8px;
+  }
+
+  /* ── Select ── */
+  select {
+    width: 100%;
+    background: #0d0d14;
+    border: 1px solid #333344;
+    color: #e0e0f0;
+    border-radius: 8px;
+    font-size: 15px;
+    padding: 10px 12px;
+    outline: none;
+    appearance: none;
+    -webkit-appearance: none;
+    margin-bottom: 10px;
+  }
+  select:disabled { opacity: 0.4; }
+
+  /* ── Timeout row ── */
+  .row { display: flex; align-items: center; gap: 10px; }
+  .row label { font-size: 13px; color: #aaaacc; white-space: nowrap; }
+  input[type="number"] {
+    width: 70px;
+    background: #0d0d14;
+    border: 1px solid #333344;
+    color: #e0e0f0;
+    border-radius: 8px;
+    font-size: 15px;
+    padding: 8px 10px;
+    outline: none;
+    text-align: center;
+  }
+  input[type="number"]:disabled { opacity: 0.4; }
+
+  /* ── Main button (START / STOP toggle) ── */
+  .btn-main {
+    width: 100%;
+    padding: 14px;
+    border: none;
+    border-radius: 10px;
+    font-size: 16px;
+    font-weight: 700;
+    cursor: pointer;
+    margin-top: 10px;
+    transition: background 0.25s, color 0.25s, opacity 0.15s;
+    background: #00ff88;
+    color: #000;
+  }
+  .btn-main:active { opacity: 0.8; }
+  .btn-main.running { background: #ff4466; color: #fff; }
+
+  /* ── Task card ── */
+  .task-desc {
+    font-size: 16px;
+    font-weight: 600;
+    color: #00ff88;
+    margin-bottom: 10px;
+    line-height: 1.4;
+  }
+  .progress-row { display: flex; align-items: center; gap: 10px; }
+  .progress-track { flex: 1; height: 8px; background: #222233; border-radius: 4px; overflow: hidden; }
+  .progress-fill  { height: 100%; background: #00ff88; border-radius: 4px; width: 0%; transition: width 0.3s ease; }
+  .progress-num   { font-size: 13px; color: #aaaacc; white-space: nowrap; font-variant-numeric: tabular-nums; }
+
+  /* ── Log ── */
+  .log-box {
+    background: #0a0a10;
+    border: 1px solid #1a1a28;
+    border-radius: 8px;
+    padding: 10px;
+    height: 240px;
+    overflow-y: auto;
+    font-family: 'Courier New', monospace;
+    font-size: 11px;
+    line-height: 1.7;
+    -webkit-overflow-scrolling: touch;
+  }
+  .ll { display: flex; gap: 6px; }
+  .lt { color: #444466; flex-shrink: 0; }
+  .lm { word-break: break-word; }
+  .lm.info  { color: #7799ff; }
+  .lm.event { color: #00ff88; }
+  .lm.warn  { color: #ffbb00; }
+  .lm.error { color: #ff4466; }
+  .lm.data  { color: #bb77ff; }
+
+  /* ── Result ── */
+  .result {
+    border-radius: 10px;
+    padding: 16px;
+    display: none;
+    margin-bottom: 12px;
+  }
+  .result.success { background: rgba(0,255,136,0.1); border: 1px solid #00ff88; }
+  .result.failure { background: rgba(255,68,102,0.1); border: 1px solid #ff4466; }
+  .result-title { font-size: 18px; font-weight: 700; margin-bottom: 4px; }
+  .result.success .result-title { color: #00ff88; }
+  .result.failure .result-title { color: #ff4466; }
+  .result-sub { font-size: 13px; color: #aaaacc; }
+
+  /* ── Permission notice ── */
+  .perm {
+    background: rgba(255,190,0,0.08);
+    border: 1px solid rgba(255,190,0,0.3);
+    border-radius: 8px;
+    padding: 10px 12px;
+    font-size: 12px;
+    color: #ffbb00;
+    line-height: 1.6;
+    display: none;
+    margin-bottom: 12px;
+  }
+  .perm.show { display: block; }
+
+  /* ── Diag card ── */
+  .diag-row { display: flex; justify-content: space-between; align-items: center; padding: 4px 0; border-bottom: 1px solid #1a1a28; font-size: 12px; }
+  .diag-row:last-child { border-bottom: none; }
+  .diag-key { color: #666688; }
+  .diag-val { font-weight: 600; }
+  .ok   { color: #00ff88; }
+  .no   { color: #ff4466; }
+  .maybe{ color: #ffbb00; }
+
+  .hidden { display: none !important; }
+</style>
+</head>
+<body>
+
+<!-- Header with timer ring -->
+<div class="header">
+  <div class="header-left">
+    <h1>Motion Lab</h1>
+    <p>Mobile sensor activity tester</p>
+  </div>
+  <div class="ring-wrap">
+    <svg width="64" height="64" viewBox="0 0 64 64">
+      <circle class="ring-bg"   cx="32" cy="32" r="28"/>
+      <circle class="ring-fill" id="ringFill" cx="32" cy="32" r="28"/>
+    </svg>
+    <div class="ring-label">
+      <span class="ring-num" id="ringNum">--</span>
+      <span class="ring-unit">sec</span>
+    </div>
+  </div>
+</div>
+
+<!-- Browser / sensor diagnostics -->
+<div class="card" id="diagCard">
+  <div class="card-label">Sensor diagnostics</div>
+  <div class="diag-row">
+    <span class="diag-key">Protocol</span>
+    <span class="diag-val" id="dProto">—</span>
+  </div>
+  <div class="diag-row">
+    <span class="diag-key">DeviceMotionEvent</span>
+    <span class="diag-val" id="dMotion">—</span>
+  </div>
+  <div class="diag-row">
+    <span class="diag-key">DeviceOrientationEvent</span>
+    <span class="diag-val" id="dOrient">—</span>
+  </div>
+  <div class="diag-row">
+    <span class="diag-key">iOS permission required</span>
+    <span class="diag-val" id="dIOSperm">—</span>
+  </div>
+  <div class="diag-row">
+    <span class="diag-key">Sensors will work</span>
+    <span class="diag-val" id="dWill">—</span>
+  </div>
+</div>
+
+<!-- Result -->
+<div class="result" id="result">
+  <div class="result-title" id="resultTitle">—</div>
+  <div class="result-sub"   id="resultSub">—</div>
+</div>
+
+<!-- Permission notice -->
+<div class="perm" id="permNotice"></div>
+
+<!-- Setup / session card (swaps content) -->
+<div class="card" id="controlCard">
+
+  <!-- Setup state -->
+  <div id="setupState">
+    <div class="card-label">Select activity</div>
+    <select id="activitySelect" onchange="onActivityChange()">
+      <option value="">— choose activity —</option>
+      <option value="shake5">Shake phone 5 times</option>
+      <option value="shake10">Shake phone 10 times</option>
+      <option value="tilt">Tilt left then right</option>
+      <option value="facedown">Flip phone face-down</option>
+      <option value="rotate360">Rotate phone 360°</option>
+    </select>
+    <div class="row">
+      <label>Timeout (seconds):</label>
+      <input type="number" id="timeoutInput" value="60" min="5" max="300">
+    </div>
+  </div>
+
+  <!-- Session state (hidden until running) -->
+  <div id="sessionState" class="hidden">
+    <div class="card-label">Current task</div>
+    <div class="task-desc" id="taskDesc">—</div>
+    <div class="progress-row">
+      <div class="progress-track"><div class="progress-fill" id="progFill"></div></div>
+      <div class="progress-num" id="progNum">0 / 0</div>
+    </div>
+  </div>
+
+  <!-- Single button — START or STOP -->
+  <button class="btn-main" id="mainBtn" onclick="handleBtn()">START</button>
+</div>
+
+<!-- Log -->
+<div class="card">
+  <div class="card-label">Sensor log</div>
+  <div class="log-box" id="logBox"></div>
+</div>
+
+<script>
+// ── Activities ─────────────────────────────────────────
+const ACTIVITIES = {
+  shake5:    { label: 'Shake your phone 5 times',  target: 5,   unit: 'shakes', sensors: ['motion'] },
+  shake10:   { label: 'Shake your phone 10 times', target: 10,  unit: 'shakes', sensors: ['motion'] },
+  tilt:      { label: 'Tilt LEFT then RIGHT',       target: 2,   unit: 'tilts',  sensors: ['orientation'] },
+  facedown:  { label: 'Flip phone face-down',       target: 1,   unit: 'flip',   sensors: ['orientation'] },
+  rotate360: { label: 'Rotate phone 360°',          target: 360, unit: '°',      sensors: ['orientation'] },
+};
+
+// ── State ──────────────────────────────────────────────
+let active = false, countdown = null;
+let secondsLeft = 60, totalSecs = 60, sessionStart = null;
+let motionCb = null, orientCb = null;
+let shakeCount = 0, lastShakeTime = 0, lastAccel = null;
+let tiltL = false, tiltR = false, faceDown = false;
+let totalRot = 0, lastAlpha = null, rotDone = false;
+
+const $ = id => document.getElementById(id);
+const CIRC = 175.9; // 2π × 28
+
+// ── Logging ────────────────────────────────────────────
+function log(msg, type = '') {
+  const box = $('logBox');
+  const ts  = new Date().toTimeString().slice(0, 8);
+  const div = document.createElement('div');
+  div.className = 'll';
+  div.innerHTML = `<span class="lt">${ts}</span><span class="lm ${type}">${escHtml(msg)}</span>`;
+  box.appendChild(div);
+  box.scrollTop = box.scrollHeight;
+}
+function escHtml(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+// ── Timer ring ─────────────────────────────────────────
+function setRing(s, total) {
+  const pct  = Math.max(s / total, 0);
+  const warn = s <= 10;
+  $('ringFill').style.strokeDashoffset = CIRC * (1 - pct);
+  $('ringFill').classList.toggle('warn', warn);
+  $('ringNum').textContent  = s < 0 ? 0 : s;
+  $('ringNum').classList.toggle('warn', warn);
+}
+function resetRing() {
+  $('ringFill').style.strokeDashoffset = CIRC;
+  $('ringFill').classList.remove('warn');
+  $('ringNum').textContent = '--';
+  $('ringNum').classList.remove('warn');
+}
+
+// ── Progress bar ───────────────────────────────────────
+function setProgress(cur, total) {
+  $('progFill').style.width = Math.min(cur / total * 100, 100) + '%';
+  $('progNum').textContent  = cur + ' / ' + total;
+}
+
+// ── Diagnostics on page load ───────────────────────────
+function runDiagnostics() {
+  const proto    = location.protocol;
+  const isSecure = proto === 'https:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1';
+  const hasMotion  = typeof DeviceMotionEvent !== 'undefined';
+  const hasOrient  = typeof DeviceOrientationEvent !== 'undefined';
+  const needsPerm  = hasMotion && typeof DeviceMotionEvent.requestPermission === 'function';
+  const willWork   = hasMotion && hasOrient && (isSecure || !needsPerm);
+
+  function set(id, text, cls) {
+    const el = $(id);
+    el.textContent = text;
+    el.className = 'diag-val ' + cls;
+  }
+
+  set('dProto',   proto + (isSecure ? ' ✓' : ' ✗ — needs https or localhost'), isSecure ? 'ok' : 'no');
+  set('dMotion',  hasMotion  ? 'Available ✓' : 'Not supported ✗', hasMotion  ? 'ok' : 'no');
+  set('dOrient',  hasOrient  ? 'Available ✓' : 'Not supported ✗', hasOrient  ? 'ok' : 'no');
+  set('dIOSperm', needsPerm  ? 'Yes (iOS 13+)' : 'No', needsPerm ? 'maybe' : 'ok');
+  set('dWill',    willWork   ? 'Yes ✓' : (isSecure ? 'Partial' : 'NO — use https/localhost'), willWork ? 'ok' : 'no');
+
+  // Warn in perm notice if not secure
+  if (!isSecure) {
+    const n = $('permNotice');
+    n.innerHTML = '⚠ <strong>HTTP detected.</strong> Motion sensors require <strong>https://</strong> or <strong>localhost</strong>. ' +
+      'Open this page via <code>localhost:5500</code> instead of your IP address, or set up HTTPS.';
+    n.classList.add('show');
+  }
+}
+
+// ── Activity change ────────────────────────────────────
+function onActivityChange() {
+  const key = $('activitySelect').value;
+  $('result').style.display = 'none';
+  const n = $('permNotice');
+  if (!key) { n.classList.remove('show'); return; }
+
+  const isSecure = location.protocol === 'https:' ||
+                   location.hostname === 'localhost' ||
+                   location.hostname === '127.0.0.1';
+  const needsPerm = typeof DeviceMotionEvent?.requestPermission === 'function';
+
+  if (!isSecure) {
+    n.innerHTML = '⚠ Sensors blocked on plain HTTP. Use <strong>localhost:5500</strong> or HTTPS.';
+    n.classList.add('show');
+  } else if (needsPerm) {
+    n.innerHTML = '⚠ iOS detected — a permission prompt will appear when you tap START. Tap <strong>Allow</strong>.';
+    n.classList.add('show');
+  } else {
+    n.innerHTML = 'ℹ Sensors ready. Tap START and perform the activity.';
+    n.classList.add('show');
+  }
+}
+
+// ── Button handler ─────────────────────────────────────
+function handleBtn() {
+  if (active) { stopSession('User stopped'); }
+  else        { startSession(); }
+}
+
+// ── Start session ──────────────────────────────────────
+async function startSession() {
+  const key = $('activitySelect').value;
+  if (!key) { log('Please select an activity first.', 'warn'); return; }
+  const act  = ACTIVITIES[key];
+  const secs = parseInt($('timeoutInput').value) || 60;
+
+  $('logBox').innerHTML = '';
+  $('result').style.display = 'none';
+  log('=== Session starting ===', 'info');
+  log('Activity: ' + act.label, 'info');
+  log('Timeout: ' + secs + 's', 'info');
+  log('Protocol: ' + location.protocol, 'data');
+  log('Host: ' + location.hostname, 'data');
+
+  // ── Permission handling ──
+  if (act.sensors.includes('motion')) {
+    log('Checking DeviceMotionEvent...', 'info');
+    if (typeof DeviceMotionEvent === 'undefined') {
+      log('DeviceMotionEvent NOT supported on this browser.', 'error'); return;
+    }
+    if (typeof DeviceMotionEvent.requestPermission === 'function') {
+      log('iOS: calling DeviceMotionEvent.requestPermission()...', 'warn');
+      try {
+        const r = await DeviceMotionEvent.requestPermission();
+        log('Permission response: ' + r, r === 'granted' ? 'event' : 'error');
+        if (r !== 'granted') { log('Cannot proceed without motion permission.', 'error'); return; }
+      } catch(e) {
+        log('requestPermission() threw: ' + e.message, 'error');
+        log('Tip: are you on https:// or localhost?', 'warn');
+        return;
+      }
+    } else {
+      log('No requestPermission needed (Android/desktop).', 'info');
+      log('Will verify sensor fires after start...', 'info');
+    }
+  }
+
+  if (act.sensors.includes('orientation')) {
+    log('Checking DeviceOrientationEvent...', 'info');
+    if (typeof DeviceOrientationEvent === 'undefined') {
+      log('DeviceOrientationEvent NOT supported.', 'error'); return;
+    }
+    if (typeof DeviceOrientationEvent.requestPermission === 'function') {
+      log('iOS: calling DeviceOrientationEvent.requestPermission()...', 'warn');
+      try {
+        const r = await DeviceOrientationEvent.requestPermission();
+        log('Permission response: ' + r, r === 'granted' ? 'event' : 'error');
+        if (r !== 'granted') { log('Cannot proceed without orientation permission.', 'error'); return; }
+      } catch(e) {
+        log('requestPermission() threw: ' + e.message, 'error');
+        return;
+      }
+    } else {
+      log('No requestPermission needed (Android/desktop).', 'info');
+    }
+  }
+
+  // ── Reset counters ──
+  shakeCount = 0; lastShakeTime = 0; lastAccel = null;
+  tiltL = false; tiltR = false; faceDown = false;
+  totalRot = 0; lastAlpha = null; rotDone = false;
+
+  // ── UI: running state ──
+  active = true; totalSecs = secs; secondsLeft = secs; sessionStart = Date.now();
+  $('activitySelect').disabled = true;
+  $('timeoutInput').disabled   = true;
+  $('setupState').classList.add('hidden');
+  $('sessionState').classList.remove('hidden');
+  $('mainBtn').textContent = 'STOP';
+  $('mainBtn').classList.add('running');
+  $('taskDesc').textContent = act.label;
+  setProgress(0, act.target);
+  setRing(secs, secs);
+
+  log('GO! Waiting for sensor events...', 'event');
+
+  // ── Attach listeners ──
+  if (key === 'shake5' || key === 'shake10') {
+    motionCb = e => onShake(e, act.target);
+    window.addEventListener('devicemotion', motionCb);
+    log('devicemotion listener: attached', 'info');
+    // verify sensor fires
+    let verified = false;
+    const verifyTimer = setTimeout(() => {
+      if (!verified) log('WARNING: no devicemotion events received after 3s — sensor may be blocked or unavailable.', 'warn');
+    }, 3000);
+    const verifyOnce = () => { verified = true; clearTimeout(verifyTimer); log('devicemotion firing ✓', 'event'); window.removeEventListener('devicemotion', verifyOnce); };
+    window.addEventListener('devicemotion', verifyOnce);
+  }
+
+  if (['tilt','facedown','rotate360'].includes(key)) {
+    orientCb = e => {
+      if (key === 'tilt')      onTilt(e);
+      if (key === 'facedown')  onFaceDown(e);
+      if (key === 'rotate360') onRotate(e);
+    };
+    window.addEventListener('deviceorientation', orientCb);
+    log('deviceorientation listener: attached', 'info');
+    let verified = false;
+    const verifyTimer = setTimeout(() => {
+      if (!verified) log('WARNING: no deviceorientation events after 3s — sensor may be blocked.', 'warn');
+    }, 3000);
+    const verifyOnce = () => { verified = true; clearTimeout(verifyTimer); log('deviceorientation firing ✓', 'event'); window.removeEventListener('deviceorientation', verifyOnce); };
+    window.addEventListener('deviceorientation', verifyOnce);
+  }
+
+  // ── Countdown ──
+  countdown = setInterval(() => {
+    secondsLeft--;
+    setRing(secondsLeft, totalSecs);
+    if (secondsLeft <= 0) stopSession('Time expired');
+  }, 1000);
+}
+
+// ── Stop session ───────────────────────────────────────
+function stopSession(reason) {
+  if (!active) return;
+  active = false;
+  clearInterval(countdown);
+
+  if (motionCb) { window.removeEventListener('devicemotion', motionCb); motionCb = null; }
+  if (orientCb) { window.removeEventListener('deviceorientation', orientCb); orientCb = null; }
+
+  // UI: back to setup state
+  $('activitySelect').disabled = false;
+  $('timeoutInput').disabled   = false;
+  $('setupState').classList.remove('hidden');
+  $('sessionState').classList.add('hidden');
+  $('mainBtn').textContent = 'START';
+  $('mainBtn').classList.remove('running');
+  resetRing();
+
+  const key  = $('activitySelect').value;
+  const act  = ACTIVITIES[key];
+  const elapsed = ((Date.now() - sessionStart) / 1000).toFixed(1);
+
+  let cur = 0;
+  if (key === 'shake5' || key === 'shake10') cur = shakeCount;
+  if (key === 'tilt')      cur = (tiltL ? 1 : 0) + (tiltR ? 1 : 0);
+  if (key === 'facedown')  cur = faceDown ? 1 : 0;
+  if (key === 'rotate360') cur = Math.min(Math.round(totalRot), 360);
+
+  const ok = reason === 'Target completed';
+
+  log('=== Session ended: ' + reason + ' ===', ok ? 'event' : 'warn');
+  log('Score: ' + cur + ' / ' + act.target + ' ' + act.unit, 'data');
+  log('Time: ' + elapsed + 's', 'data');
+  log('Result: ' + (ok ? 'SUCCESS ✓' : 'FAILURE ✗'), ok ? 'event' : 'error');
+
+  const el = $('result');
+  el.className   = 'result ' + (ok ? 'success' : 'failure');
+  el.style.display = 'block';
+  $('resultTitle').textContent = ok ? '✓ Activity completed!' : '✗ Activity failed';
+  $('resultSub').textContent   = act.label + ' — ' + cur + '/' + act.target + ' ' + act.unit + ' in ' + elapsed + 's';
+}
+
+// ── Shake ──────────────────────────────────────────────
+function onShake(e, target) {
+  const a = e.accelerationIncludingGravity;
+  if (!a) { log('accelerationIncludingGravity is null', 'error'); return; }
+  const {x, y, z} = a;
+  if (!lastAccel) { lastAccel = {x, y, z}; return; }
+  const mag = Math.sqrt((x-lastAccel.x)**2 + (y-lastAccel.y)**2 + (z-lastAccel.z)**2);
+  lastAccel = {x, y, z};
+  const now = Date.now();
+  if (mag > 14 && now - lastShakeTime > 350) {
+    shakeCount++;
+    lastShakeTime = now;
+    log('SHAKE #' + shakeCount + ' detected — magnitude: ' + mag.toFixed(2) + ' m/s²', 'event');
+    setProgress(shakeCount, target);
+    if (shakeCount >= target) stopSession('Target completed');
+  }
+}
+
+// ── Tilt ───────────────────────────────────────────────
+function onTilt(e) {
+  const g = e.gamma;
+  if (g === null) return;
+  if (!tiltL && g < -35) {
+    tiltL = true;
+    log('TILT LEFT — gamma: ' + g.toFixed(1) + '°', 'event');
+    setProgress(1, 2);
+  }
+  if (tiltL && !tiltR && g > 35) {
+    tiltR = true;
+    log('TILT RIGHT — gamma: ' + g.toFixed(1) + '°', 'event');
+    setProgress(2, 2);
+    stopSession('Target completed');
+  }
+}
+
+// ── Face down ──────────────────────────────────────────
+function onFaceDown(e) {
+  const b = e.beta;
+  if (b === null || faceDown) return;
+  if (Math.abs(b) > 150 || Math.abs(b) < 10) {
+    faceDown = true;
+    log('FACE-DOWN — beta: ' + b.toFixed(1) + '°', 'event');
+    setProgress(1, 1);
+    stopSession('Target completed');
+  }
+}
+
+// ── Rotate 360 ─────────────────────────────────────────
+function onRotate(e) {
+  const a = e.alpha; 
+  if (a === null || rotDone) return;
+  if (lastAlpha === null) { lastAlpha = a; return; }
+  let d = a - lastAlpha;
+  if (d > 180) d -= 360;
+  if (d < -180) d += 360;
+  totalRot += Math.abs(d);
+  lastAlpha = a;
+  const deg = Math.min(Math.round(totalRot), 360);
+  setProgress(deg, 360);
+  if (totalRot >= 360 && !rotDone) {
+    rotDone = true;
+    log('360° ROTATION complete — alpha: ' + a.toFixed(1) + '°', 'event');
+    stopSession('Target completed');
+  }
+}
+
+// ── Run diagnostics on load ────────────────────────────
+runDiagnostics();
+</script>
+</body>
+</html>
