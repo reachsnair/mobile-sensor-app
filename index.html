@@ -247,6 +247,7 @@
       <option value="">— choose activity —</option>
       <option value="shake5">Shake phone 5 times</option>
       <option value="shake10">Shake phone 10 times</option>
+      <option value="walk10">Walk 10 steps</option>
       <option value="tilt">Tilt left then right</option>
       <option value="facedown">Flip phone face-down</option>
       <option value="rotate360">Rotate phone 360°</option>
@@ -282,6 +283,7 @@
 const ACTIVITIES = {
   shake5:    { label: 'Shake your phone 5 times',  target: 5,   unit: 'shakes', sensors: ['motion'] },
   shake10:   { label: 'Shake your phone 10 times', target: 10,  unit: 'shakes', sensors: ['motion'] },
+  walk10:    { label: 'Walk 10 steps',              target: 10,  unit: 'steps',  sensors: ['motion'] },
   tilt:      { label: 'Tilt LEFT then RIGHT',       target: 2,   unit: 'tilts',  sensors: ['orientation'] },
   facedown:  { label: 'Flip phone face-down',       target: 1,   unit: 'flip',   sensors: ['orientation'] },
   rotate360: { label: 'Rotate phone 360°',          target: 360, unit: '°',      sensors: ['orientation'] },
@@ -292,6 +294,7 @@ let active = false, countdown = null;
 let secondsLeft = 60, totalSecs = 60, sessionStart = null;
 let motionCb = null, orientCb = null;
 let shakeCount = 0, lastShakeTime = 0, lastAccel = null;
+let stepCount = 0, lastStepTime = 0, lastMagForStep = 0, stepRising = false;
 let tiltL = false, tiltR = false, faceDown = false;
 let totalRot = 0, lastAlpha = null, rotDone = false;
 
@@ -452,6 +455,7 @@ async function startSession() {
 
   // ── Reset counters ──
   shakeCount = 0; lastShakeTime = 0; lastAccel = null;
+  stepCount = 0; lastStepTime = 0; lastMagForStep = 0; stepRising = false;
   tiltL = false; tiltR = false; faceDown = false;
   totalRot = 0; lastAlpha = null; rotDone = false;
 
@@ -475,6 +479,18 @@ async function startSession() {
     window.addEventListener('devicemotion', motionCb);
     log('devicemotion listener: attached', 'info');
     // verify sensor fires
+    let verified = false;
+    const verifyTimer = setTimeout(() => {
+      if (!verified) log('WARNING: no devicemotion events received after 3s — sensor may be blocked or unavailable.', 'warn');
+    }, 3000);
+    const verifyOnce = () => { verified = true; clearTimeout(verifyTimer); log('devicemotion firing ✓', 'event'); window.removeEventListener('devicemotion', verifyOnce); };
+    window.addEventListener('devicemotion', verifyOnce);
+  }
+
+  if (key === 'walk10') {
+    motionCb = e => onStep(e, act.target);
+    window.addEventListener('devicemotion', motionCb);
+    log('devicemotion listener: attached (step mode)', 'info');
     let verified = false;
     const verifyTimer = setTimeout(() => {
       if (!verified) log('WARNING: no devicemotion events received after 3s — sensor may be blocked or unavailable.', 'warn');
@@ -565,6 +581,28 @@ function onShake(e, target) {
     setProgress(shakeCount, target);
     if (shakeCount >= target) stopSession('Target completed');
   }
+}
+
+// ── Step ───────────────────────────────────────────────
+function onStep(e, target) {
+  const a = e.accelerationIncludingGravity;
+  if (!a) { log('accelerationIncludingGravity is null', 'error'); return; }
+  const {x, y, z} = a;
+  const mag = Math.sqrt(x*x + y*y + z*z);
+  const now = Date.now();
+  // Peak detection: step = magnitude rises above 11 then falls (one full oscillation per stride)
+  if (!stepRising && mag > 11) {
+    stepRising = true;
+  }
+  if (stepRising && mag < 9 && now - lastStepTime > 300) {
+    stepRising = false;
+    stepCount++;
+    lastStepTime = now;
+    log('STEP #' + stepCount + ' detected — magnitude: ' + mag.toFixed(2) + ' m/s²', 'event');
+    setProgress(stepCount, target);
+    if (stepCount >= target) stopSession('Target completed');
+  }
+  lastMagForStep = mag;
 }
 
 // ── Tilt ───────────────────────────────────────────────
