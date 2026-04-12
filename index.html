@@ -188,6 +188,12 @@
   .no   { color: #ff4466; }
   .maybe{ color: #ffbb00; }
 
+  /* ── Camera preview ── */
+  .camera-preview { display: none; margin-bottom: 10px; text-align: center; }
+  .camera-preview video { width: 100%; max-width: 280px; border-radius: 10px; border: 1px solid #333344; transform: scaleX(-1); background: #0a0a10; }
+  .camera-preview.show { display: block; }
+  select option:disabled { color: #444466; }
+
   .hidden { display: none !important; }
 </style>
 </head>
@@ -251,6 +257,10 @@
     <span class="diag-key">Sensors will work</span>
     <span class="diag-val" id="dWill">—</span>
   </div>
+  <div class="diag-row">
+    <span class="diag-key">Camera (blink activity)</span>
+    <span class="diag-val" id="dCamera">—</span>
+  </div>
 </div>
 
 <!-- Result -->
@@ -281,6 +291,7 @@
       <option value="rotate360">Rotate phone 360°</option>
       <option value="halfturn">Half turn (180°)</option>
       <option value="jump1">Jump once</option>
+      <option value="blink3" id="blink3Option" disabled>Blink 3 times (checking device…)</option>
     </select>
     <div class="row">
       <label>Timeout (seconds):</label>
@@ -290,6 +301,9 @@
 
   <!-- Session state (hidden until running) -->
   <div id="sessionState" class="hidden">
+    <div class="camera-preview" id="blinkPreview">
+      <video id="blinkVideo" playsinline muted autoplay></video>
+    </div>
     <div class="card-label">Current task</div>
     <div class="task-desc" id="taskDesc">—</div>
     <div class="progress-row">
@@ -322,6 +336,7 @@ const ACTIVITIES = {
   rotate360: { label: 'Rotate phone 360°',           target: 360, unit: '°',      sensors: ['orientation'] },
   halfturn:  { label: 'Half turn (180°)',            target: 180, unit: '°',      sensors: ['orientation'] },
   jump1:     { label: 'Jump once',                   target: 1,   unit: 'jump',   sensors: ['motion'] },
+  blink3:    { label: 'Blink 3 times',               target: 3,   unit: 'blinks', sensors: ['camera'] },
 };
 
 // ── State ──────────────────────────────────────────────
@@ -335,6 +350,8 @@ let stillSeconds = 0, lastMagSnapshot = 9.8, stillInterval = null;
 let nodCount = 0, nodDown = false;
 let jumpPhase = 'waiting', freefallStart = 0;
 let halfTurnRot = 0, halfTurnAlpha = null, halfTurnDone = false;
+let blinkCount = 0, lastBlinkTime = 0, blinkEyeOpen = true;
+let faceLandmarker = null, blinkStream = null, blinkAnimFrame = null;
 let tiltL = false, tiltR = false, faceDown = false;
 let totalRot = 0, lastAlpha = null, rotDone = false;
 
@@ -416,6 +433,12 @@ function onActivityChange() {
                    location.hostname === 'localhost' ||
                    location.hostname === '127.0.0.1';
   const needsPerm = typeof DeviceMotionEvent?.requestPermission === 'function';
+
+  if (key === 'blink3') {
+    n.innerHTML = 'ℹ Camera will open when you tap START. Grant camera permission and look at the front camera.';
+    n.classList.add('show');
+    return;
+  }
 
   if (!isSecure) {
     n.innerHTML = '⚠ Sensors blocked on plain HTTP. Use <strong>localhost:5500</strong> or HTTPS.';
@@ -502,6 +525,7 @@ async function startSession() {
   nodCount = 0; nodDown = false;
   jumpPhase = 'waiting'; freefallStart = 0;
   halfTurnRot = 0; halfTurnAlpha = null; halfTurnDone = false;
+  blinkCount = 0; lastBlinkTime = 0; blinkEyeOpen = true;
   tiltL = false; tiltR = false; faceDown = false;
   totalRot = 0; lastAlpha = null; rotDone = false;
 
@@ -567,6 +591,10 @@ async function startSession() {
     }
   }
 
+  if (key === 'blink3') {
+    startBlinkSession(act.target);  // async, runs alongside countdown
+  }
+
   if (['tilt', 'facedown', 'rotate360', 'nod3', 'halfturn'].includes(key)) {
     orientCb = e => {
       if (key === 'tilt')      onTilt(e);
@@ -602,6 +630,7 @@ function stopSession(reason) {
   if (motionCb) { window.removeEventListener('devicemotion', motionCb); motionCb = null; }
   if (orientCb) { window.removeEventListener('deviceorientation', orientCb); orientCb = null; }
   if (stillInterval) { clearInterval(stillInterval); stillInterval = null; }
+  stopBlinkSession();
 
   // UI: back to setup state
   $('activitySelect').disabled = false;
@@ -810,8 +839,119 @@ function onRotate(e) {
   }
 }
 
+// ── Blink: capability check ────────────────────────────
+function checkBlinkCapability() {
+  const opt = $('blink3Option');
+  const isSecure  = window.isSecureContext;
+  const hasCamera = !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
+  const hasWasm   = typeof WebAssembly === 'object';
+  const capable   = isSecure && hasCamera && hasWasm;
+
+  const reasons = [];
+  if (!isSecure)  reasons.push('needs HTTPS');
+  if (!hasCamera) reasons.push('no camera API');
+  if (!hasWasm)   reasons.push('no WebAssembly');
+
+  const set = (id, text, cls) => { const el = $(id); if (el) { el.textContent = text; el.className = 'diag-val ' + cls; } };
+  set('dCamera', capable ? 'Supported ✓' : 'Not supported ✗ — ' + reasons.join(', '), capable ? 'ok' : 'no');
+
+  if (capable) {
+    opt.disabled = false;
+    opt.textContent = 'Blink 3 times';
+  } else {
+    opt.textContent = 'Blink 3 times — requires: ' + reasons.join(', ');
+  }
+}
+
+// ── Blink: MediaPipe init (lazy) ───────────────────────
+async function initFaceLandmarker() {
+  if (faceLandmarker) return true;
+  try {
+    log('Loading MediaPipe FaceLandmarker (~8 MB)…', 'info');
+    const vision = await import('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs');
+    const filesetResolver = await vision.FilesetResolver.forVisionTasks(
+      'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm'
+    );
+    faceLandmarker = await vision.FaceLandmarker.createFromOptions(filesetResolver, {
+      baseOptions: {
+        modelAssetPath: 'https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task',
+        delegate: 'GPU'
+      },
+      outputFaceBlendshapes: true,
+      runningMode: 'VIDEO',
+      numFaces: 1
+    });
+    log('FaceLandmarker ready ✓', 'event');
+    return true;
+  } catch (e) {
+    log('MediaPipe failed to load: ' + e.message, 'error');
+    return false;
+  }
+}
+
+// ── Blink: start camera session ────────────────────────
+async function startBlinkSession(target) {
+  const ok = await initFaceLandmarker();
+  if (!ok) { stopSession('MediaPipe failed'); return; }
+
+  try {
+    blinkStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user', width: 320, height: 240 } });
+  } catch (e) {
+    log('Camera denied: ' + e.message, 'error');
+    stopSession('Camera access denied');
+    return;
+  }
+
+  const video = $('blinkVideo');
+  video.srcObject = blinkStream;
+  await new Promise(res => { video.onloadedmetadata = res; });
+  video.play();
+  $('blinkPreview').classList.add('show');
+  log('Camera ready ✓ — look at the camera and blink naturally', 'event');
+  processBlinkFrame(target);
+}
+
+// ── Blink: per-frame detection ─────────────────────────
+function processBlinkFrame(target) {
+  if (!active) return;
+  const video = $('blinkVideo');
+  if (video.readyState < 2) {
+    blinkAnimFrame = requestAnimationFrame(() => processBlinkFrame(target));
+    return;
+  }
+  const result = faceLandmarker.detectForVideo(video, Date.now());
+  if (result.faceBlendshapes && result.faceBlendshapes.length > 0) {
+    const shapes = result.faceBlendshapes[0].categories;
+    const leftScore  = shapes.find(s => s.categoryName === 'eyeBlinkLeft')?.score  ?? 0;
+    const rightScore = shapes.find(s => s.categoryName === 'eyeBlinkRight')?.score ?? 0;
+    const score = (leftScore + rightScore) / 2;
+    const now = Date.now();
+    if (blinkEyeOpen && score > 0.55) {
+      blinkEyeOpen = false;  // eye closing
+    }
+    if (!blinkEyeOpen && score < 0.2 && now - lastBlinkTime > 350) {
+      blinkEyeOpen = true;   // eye reopened — full blink complete
+      blinkCount++;
+      lastBlinkTime = now;
+      log('BLINK #' + blinkCount + ' detected (score: ' + score.toFixed(2) + ')', 'event');
+      setProgress(blinkCount, target);
+      if (blinkCount >= target) { stopSession('Target completed'); return; }
+    }
+  }
+  blinkAnimFrame = requestAnimationFrame(() => processBlinkFrame(target));
+}
+
+// ── Blink: cleanup ─────────────────────────────────────
+function stopBlinkSession() {
+  if (blinkAnimFrame) { cancelAnimationFrame(blinkAnimFrame); blinkAnimFrame = null; }
+  if (blinkStream)    { blinkStream.getTracks().forEach(t => t.stop()); blinkStream = null; }
+  const preview = $('blinkPreview');
+  if (preview) preview.classList.remove('show');
+}
+
 // ── Run diagnostics on load ────────────────────────────
 runDiagnostics();
+checkBlinkCapability();
 </script>
 </body>
 </html>
