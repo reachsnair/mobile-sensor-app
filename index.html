@@ -276,7 +276,7 @@
       <option value="tap3">Tap phone 3 times</option>
       <option value="still5">Hold still for 5 seconds</option>
       <option value="tilt">Tilt left then right</option>
-      <option value="nod3">Nod yes 3 times</option>
+      <option value="nod3">Tilt forward 3 times</option>
       <option value="facedown">Flip phone face-down</option>
       <option value="rotate360">Rotate phone 360°</option>
       <option value="halfturn">Half turn (180°)</option>
@@ -317,7 +317,7 @@ const ACTIVITIES = {
   tap3:      { label: 'Tap phone 3 times',           target: 3,   unit: 'taps',   sensors: ['motion'] },
   still5:    { label: 'Hold phone still for 5 sec',  target: 5,   unit: 'sec',    sensors: ['motion'] },
   tilt:      { label: 'Tilt LEFT then RIGHT',        target: 2,   unit: 'tilts',  sensors: ['orientation'] },
-  nod3:      { label: 'Nod yes 3 times',             target: 3,   unit: 'nods',   sensors: ['orientation'] },
+  nod3:      { label: 'Tilt forward 3 times',         target: 3,   unit: 'tilts',  sensors: ['orientation'] },
   facedown:  { label: 'Flip phone face-down',        target: 1,   unit: 'flip',   sensors: ['orientation'] },
   rotate360: { label: 'Rotate phone 360°',           target: 360, unit: '°',      sensors: ['orientation'] },
   halfturn:  { label: 'Half turn (180°)',            target: 180, unit: '°',      sensors: ['orientation'] },
