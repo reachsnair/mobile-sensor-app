@@ -204,6 +204,39 @@
   .no   { color: #ff4466; }
   .maybe{ color: #ffbb00; }
 
+  /* ── JSON response panel ── */
+  .json-panel {
+    display: none;
+    background: #16161f;
+    border: 1px solid #222233;
+    border-radius: 12px;
+    padding: 14px;
+    margin-bottom: 12px;
+  }
+  .json-panel.show { display: block; }
+  .json-header {
+    display: flex; justify-content: space-between; align-items: center;
+    margin-bottom: 10px;
+  }
+  .json-title { font-size: 11px; text-transform: uppercase; letter-spacing: 0.8px; color: #555577; }
+  .json-copy {
+    font-size: 11px; padding: 4px 10px; border-radius: 6px;
+    border: 1px solid #333344; background: #0d0d14; color: #aaaacc;
+    cursor: pointer; -webkit-tap-highlight-color: transparent;
+  }
+  .json-copy:active { opacity: 0.7; }
+  .json-copy.copied { color: #00ff88; border-color: #00ff88; }
+  .json-pre {
+    background: #0a0a10; border: 1px solid #1a1a28; border-radius: 8px;
+    padding: 12px; overflow-x: auto; font-family: 'Courier New', monospace;
+    font-size: 11px; line-height: 1.7; white-space: pre;
+    -webkit-overflow-scrolling: touch;
+  }
+  .jk { color: #7799ff; }   /* key */
+  .js { color: #ffbb00; }   /* string value */
+  .jn { color: #bb77ff; }   /* number */
+  .jb { color: #00ff88; }   /* boolean/null */
+
   /* ── Voice bars ── */
   .speech-panel { display: none; margin-bottom: 10px; }
   .speech-panel.show { display: block; }
@@ -317,6 +350,15 @@
 <div class="result" id="result">
   <div class="result-title" id="resultTitle">—</div>
   <div class="result-sub"   id="resultSub">—</div>
+</div>
+
+<!-- JSON response -->
+<div class="json-panel" id="jsonPanel">
+  <div class="json-header">
+    <span class="json-title">Response JSON to API</span>
+    <button class="json-copy" id="jsonCopyBtn" onclick="copyJSON()">Copy</button>
+  </div>
+  <div class="json-pre" id="jsonPre"></div>
 </div>
 
 <!-- Permission notice -->
@@ -433,6 +475,7 @@ let halfTurnRot = 0, halfTurnAlpha = null, halfTurnDone = false;
 let blinkCount = 0, lastBlinkTime = 0, blinkEyeOpen = true;
 let faceLandmarker = null, blinkStream = null, blinkAnimFrame = null;
 let speechRecognition = null, speechCorrect = false;
+let sessionEvents = [], currentSessionId = null;
 let tiltL = false, tiltR = false, faceDown = false;
 let totalRot = 0, lastAlpha = null, rotDone = false;
 
@@ -448,6 +491,10 @@ function log(msg, type = '') {
   div.innerHTML = `<span class="lt">${ts}</span><span class="lm ${type}">${escHtml(msg)}</span>`;
   box.appendChild(div);
   box.scrollTop = box.scrollHeight;
+  // Capture into session events for JSON response
+  if (active && sessionStart && (type === 'event' || type === 'warn' || type === 'error' || type === 'data')) {
+    sessionEvents.push({ offset_ms: Date.now() - sessionStart, type, message: msg });
+  }
 }
 function escHtml(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 
@@ -656,6 +703,9 @@ async function startSession() {
   blinkCount = 0; lastBlinkTime = 0; blinkEyeOpen = true;
   blinkFrameCount = 0; blinkNamesLogged = false;
   speechCorrect = false;
+  sessionEvents = [];
+  currentSessionId = 'sess_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6);
+  $('jsonPanel').classList.remove('show');
   tiltL = false; tiltR = false; faceDown = false;
   totalRot = 0; lastAlpha = null; rotDone = false;
 
@@ -806,6 +856,82 @@ function stopSession(reason) {
   el.style.display = 'block';
   $('resultTitle').textContent = ok ? '✓ Activity completed!' : '✗ Activity failed';
   $('resultSub').textContent   = act.label + ' — ' + cur + '/' + act.target + ' ' + act.unit + ' in ' + elapsed + 's';
+
+  displayResponseJSON(buildResponseJSON(key, act, cur, elapsed, reason, ok));
+}
+
+// ── Build API response JSON ────────────────────────────
+function buildResponseJSON(key, act, score, elapsedS, reason, passed) {
+  const deviceDesc = detectDevice();
+  const dParts = deviceDesc.split(' · ');
+  return {
+    schema_version: '1.0',
+    session_id: currentSessionId,
+    timestamp_utc: new Date().toISOString(),
+    device: {
+      type:           dParts[0] || 'Unknown',
+      os:             dParts[1] || 'Unknown',
+      browser:        dParts[2] || 'Unknown',
+      secure_context: window.isSecureContext,
+      protocol:       location.protocol,
+      user_agent:     navigator.userAgent
+    },
+    activity: {
+      key,
+      label:       act.label,
+      target:      act.target,
+      unit:        act.unit,
+      sensor_type: act.sensors[0]
+    },
+    result: {
+      status:          passed ? 'completed' : (reason === 'Time expired' ? 'timeout' : 'failed'),
+      reason,
+      score,
+      target:          act.target,
+      completion_pct:  Math.round((score / act.target) * 100),
+      duration_ms:     Math.round(parseFloat(elapsedS) * 1000),
+      duration_s:      parseFloat(elapsedS)
+    },
+    sensor_events: sessionEvents.map(e => ({
+      offset_ms: e.offset_ms,
+      type:      e.type,
+      message:   e.message
+    })),
+    verification: {
+      passed,
+      score_met:        score >= act.target,
+      sensor_fired:     sessionEvents.some(e => e.type === 'event'),
+      within_timeout:   reason !== 'Time expired',
+      event_count:      sessionEvents.filter(e => e.type === 'event').length
+    }
+  };
+}
+
+// ── Render JSON panel ──────────────────────────────────
+function displayResponseJSON(obj) {
+  const raw  = JSON.stringify(obj, null, 2);
+  const html = raw
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"([^"]+)":/g, '<span class="jk">"$1"</span>:')
+    .replace(/: "([^"]*)"/g, ': <span class="js">"$1"</span>')
+    .replace(/: (true|false|null)/g, ': <span class="jb">$1</span>')
+    .replace(/: (-?\d+\.?\d*)/g, ': <span class="jn">$1</span>');
+  $('jsonPre').innerHTML  = html;
+  $('jsonCopyBtn').textContent = 'Copy';
+  $('jsonCopyBtn').classList.remove('copied');
+  $('jsonPanel').classList.add('show');
+  // Store raw JSON for copy
+  $('jsonPanel').dataset.raw = raw;
+}
+
+function copyJSON() {
+  const raw = $('jsonPanel').dataset.raw || '';
+  navigator.clipboard.writeText(raw).then(() => {
+    const btn = $('jsonCopyBtn');
+    btn.textContent = 'Copied ✓';
+    btn.classList.add('copied');
+    setTimeout(() => { btn.textContent = 'Copy'; btn.classList.remove('copied'); }, 2000);
+  });
 }
 
 // ── Shake ──────────────────────────────────────────────
