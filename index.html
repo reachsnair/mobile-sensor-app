@@ -649,9 +649,6 @@ async function startSession() {
 
   $('logBox').innerHTML = '';
   $('result').style.display = 'none';
-  // Auto-open log when session starts
-  $('logBody').classList.add('open');
-  $('logChevron').textContent = '▼';
   log('=== Session starting ===', 'info');
   log('Activity: ' + act.label, 'info');
   log('Timeout: ' + secs + 's', 'info');
