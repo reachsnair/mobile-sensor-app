@@ -291,7 +291,7 @@
       <option value="rotate360">Rotate phone 360°</option>
       <option value="halfturn">Half turn (180°)</option>
       <option value="jump1">Jump once</option>
-      <option value="blink3" id="blink3Option" disabled>Blink 3 times (checking device…)</option>
+      <option value="blink5" id="blink5Option" disabled>Blink 5 times (checking device…)</option>
     </select>
     <div class="row">
       <label>Timeout (seconds):</label>
@@ -337,7 +337,7 @@ const ACTIVITIES = {
   rotate360: { label: 'Rotate phone 360°',           target: 360, unit: '°',      sensors: ['orientation'] },
   halfturn:  { label: 'Half turn (180°)',            target: 180, unit: '°',      sensors: ['orientation'] },
   jump1:     { label: 'Jump once',                   target: 1,   unit: 'jump',   sensors: ['motion'] },
-  blink3:    { label: 'Blink 3 times',               target: 3,   unit: 'blinks', sensors: ['camera'] },
+  blink5:    { label: 'Blink 5 times',               target: 5,   unit: 'blinks', sensors: ['camera'] },
 };
 
 // ── State ──────────────────────────────────────────────
@@ -435,7 +435,7 @@ function onActivityChange() {
                    location.hostname === '127.0.0.1';
   const needsPerm = typeof DeviceMotionEvent?.requestPermission === 'function';
 
-  if (key === 'blink3') {
+  if (key === 'blink5') {
     n.innerHTML = 'ℹ Camera will open when you tap START. Grant camera permission and look at the front camera.';
     n.classList.add('show');
     return;
@@ -593,7 +593,7 @@ async function startSession() {
     }
   }
 
-  if (key === 'blink3') {
+  if (key === 'blink5') {
     startBlinkSession(act.target);  // async, runs alongside countdown
   }
 
@@ -649,9 +649,16 @@ function stopSession(reason) {
 
   let cur = 0;
   if (key === 'shake5' || key === 'shake10') cur = shakeCount;
+  if (key === 'walk10')    cur = stepCount;
+  if (key === 'tap3')      cur = tapCount;
+  if (key === 'still5')    cur = stillSeconds;
   if (key === 'tilt')      cur = (tiltL ? 1 : 0) + (tiltR ? 1 : 0);
+  if (key === 'nod3')      cur = nodCount;
   if (key === 'facedown')  cur = faceDown ? 1 : 0;
   if (key === 'rotate360') cur = Math.min(Math.round(totalRot), 360);
+  if (key === 'halfturn')  cur = Math.min(Math.round(halfTurnRot), 180);
+  if (key === 'jump1')     cur = jumpPhase === 'done' ? 1 : 0;
+  if (key === 'blink5')    cur = blinkCount;
 
   const ok = reason === 'Target completed';
 
@@ -843,7 +850,7 @@ function onRotate(e) {
 
 // ── Blink: capability check ────────────────────────────
 function checkBlinkCapability() {
-  const opt = $('blink3Option');
+  const opt = $('blink5Option');
   const isSecure  = window.isSecureContext;
   const hasCamera = !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
   const hasWasm   = typeof WebAssembly === 'object';
