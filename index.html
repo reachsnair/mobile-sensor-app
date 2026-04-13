@@ -303,6 +303,7 @@
   <div id="sessionState" class="hidden">
     <div class="camera-preview" id="blinkPreview">
       <video id="blinkVideo" playsinline muted autoplay></video>
+      <div id="blinkStatus" style="font-size:11px;color:#555577;margin-top:4px;">Initialising…</div>
     </div>
     <div class="card-label">Current task</div>
     <div class="task-desc" id="taskDesc">—</div>
@@ -526,6 +527,7 @@ async function startSession() {
   jumpPhase = 'waiting'; freefallStart = 0;
   halfTurnRot = 0; halfTurnAlpha = null; halfTurnDone = false;
   blinkCount = 0; lastBlinkTime = 0; blinkEyeOpen = true;
+  blinkFrameCount = 0; blinkNamesLogged = false;
   tiltL = false; tiltR = false; faceDown = false;
   totalRot = 0; lastAlpha = null; rotDone = false;
 
@@ -911,7 +913,9 @@ async function startBlinkSession(target) {
   processBlinkFrame(target);
 }
 
-// ── Blink: per-frame detection ─────────────────────────
+/// ── Blink: per-frame detection ─────────────────────────
+let blinkFrameCount = 0;
+let blinkNamesLogged = false;
 function processBlinkFrame(target) {
   if (!active) return;
   const video = $('blinkVideo');
@@ -919,25 +923,53 @@ function processBlinkFrame(target) {
     blinkAnimFrame = requestAnimationFrame(() => processBlinkFrame(target));
     return;
   }
-  const result = faceLandmarker.detectForVideo(video, Date.now());
-  if (result.faceBlendshapes && result.faceBlendshapes.length > 0) {
-    const shapes = result.faceBlendshapes[0].categories;
-    const leftScore  = shapes.find(s => s.categoryName === 'eyeBlinkLeft')?.score  ?? 0;
-    const rightScore = shapes.find(s => s.categoryName === 'eyeBlinkRight')?.score ?? 0;
-    const score = (leftScore + rightScore) / 2;
-    const now = Date.now();
-    if (blinkEyeOpen && score > 0.55) {
-      blinkEyeOpen = false;  // eye closing
+
+  const result = faceLandmarker.detectForVideo(video, performance.now());
+  const statusEl = $('blinkStatus');
+  blinkFrameCount++;
+
+  if (!result.faceBlendshapes || result.faceBlendshapes.length === 0) {
+    if (blinkFrameCount % 60 === 0) {
+      log('No face detected — move closer, improve lighting', 'warn');
+      if (statusEl) statusEl.textContent = 'No face detected — move closer';
     }
-    if (!blinkEyeOpen && score < 0.2 && now - lastBlinkTime > 350) {
-      blinkEyeOpen = true;   // eye reopened — full blink complete
-      blinkCount++;
-      lastBlinkTime = now;
-      log('BLINK #' + blinkCount + ' detected (score: ' + score.toFixed(2) + ')', 'event');
-      setProgress(blinkCount, target);
-      if (blinkCount >= target) { stopSession('Target completed'); return; }
-    }
+    blinkAnimFrame = requestAnimationFrame(() => processBlinkFrame(target));
+    return;
   }
+
+  const shapes = result.faceBlendshapes[0].categories;
+
+  // On first successful detection, log available blink-related blend shapes for debugging
+  if (!blinkNamesLogged) {
+    blinkNamesLogged = true;
+    const eyeShapes = shapes.filter(s => s.categoryName.toLowerCase().includes('blink') || s.categoryName.toLowerCase().includes('eye'));
+    log('Blend shapes available: ' + eyeShapes.map(s => s.categoryName).join(', '), 'info');
+    if (statusEl) statusEl.textContent = 'Face detected ✓';
+  }
+
+  const leftScore  = shapes.find(s => s.categoryName === 'eyeBlinkLeft')?.score  ?? 0;
+  const rightScore = shapes.find(s => s.categoryName === 'eyeBlinkRight')?.score ?? 0;
+  const score = (leftScore + rightScore) / 2;
+
+  // Log scores every ~2s so user can see what values their blinks produce
+  if (blinkFrameCount % 90 === 0) {
+    log('Eye scores — L: ' + leftScore.toFixed(2) + '  R: ' + rightScore.toFixed(2) + '  avg: ' + score.toFixed(2), 'data');
+  }
+
+  const now = Date.now();
+  // Relaxed thresholds — natural blinks often only reach 0.3–0.5
+  if (blinkEyeOpen && score > 0.35) {
+    blinkEyeOpen = false;  // eye closing
+  }
+  if (!blinkEyeOpen && score < 0.25 && now - lastBlinkTime > 350) {
+    blinkEyeOpen = true;   // eye reopened — full blink complete
+    blinkCount++;
+    lastBlinkTime = now;
+    log('BLINK #' + blinkCount + ' — score peak: ' + score.toFixed(2), 'event');
+    setProgress(blinkCount, target);
+    if (blinkCount >= target) { stopSession('Target completed'); return; }
+  }
+
   blinkAnimFrame = requestAnimationFrame(() => processBlinkFrame(target));
 }
 
