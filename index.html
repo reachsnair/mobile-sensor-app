@@ -193,7 +193,7 @@
     max-height: 0;
     transition: max-height 0.3s ease;
   }
-  .diag-body.open { max-height: 400px; }
+  .diag-body.open { max-height: 600px; }
 
   /* ── Diag card ── */
   .diag-row { display: flex; justify-content: space-between; align-items: center; padding: 4px 0; border-bottom: 1px solid #1a1a28; font-size: 12px; }
@@ -413,8 +413,13 @@
 
 <!-- Log -->
 <div class="card">
-  <div class="card-label">Sensor log</div>
-  <div class="log-box" id="logBox"></div>
+  <div class="diag-toggle card-label" onclick="toggleLog()">
+    Sensor log
+    <span class="diag-chevron" id="logChevron">▶</span>
+  </div>
+  <div class="diag-body" id="logBody">
+    <div class="log-box" id="logBox"></div>
+  </div>
 </div>
 
 <!-- JSON response -->
@@ -583,12 +588,14 @@ function runDiagnostics() {
   }
 }
 
-// ── Diag accordion ────────────────────────────────────
+// ── Accordions ─────────────────────────────────────────
 function toggleDiag() {
-  const body    = $('diagBody');
-  const chevron = $('diagChevron');
-  const open    = body.classList.toggle('open');
-  chevron.textContent = open ? '▼' : '▶';
+  const open = $('diagBody').classList.toggle('open');
+  $('diagChevron').textContent = open ? '▼' : '▶';
+}
+function toggleLog() {
+  const open = $('logBody').classList.toggle('open');
+  $('logChevron').textContent = open ? '▼' : '▶';
 }
 
 // ── Activity change ────────────────────────────────────
@@ -642,6 +649,9 @@ async function startSession() {
 
   $('logBox').innerHTML = '';
   $('result').style.display = 'none';
+  // Auto-open log when session starts
+  $('logBody').classList.add('open');
+  $('logChevron').textContent = '▼';
   log('=== Session starting ===', 'info');
   log('Activity: ' + act.label, 'info');
   log('Timeout: ' + secs + 's', 'info');
