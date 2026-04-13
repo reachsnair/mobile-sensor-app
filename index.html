@@ -188,6 +188,27 @@
   .no   { color: #ff4466; }
   .maybe{ color: #ffbb00; }
 
+  /* ── Voice bars ── */
+  .speech-panel { display: none; margin-bottom: 10px; }
+  .speech-panel.show { display: block; }
+  .speech-prompt-label { font-size: 11px; color: #555577; margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.6px; }
+  .speech-prompt-text { font-size: 16px; color: #00ff88; font-weight: 600; line-height: 1.5; margin-bottom: 10px; }
+  .voice-bars { display: flex; gap: 4px; align-items: center; justify-content: center; height: 40px; margin-bottom: 8px; }
+  .voice-bar { width: 4px; height: 4px; background: #00ff88; border-radius: 2px; }
+  .voice-bars.listening .voice-bar { animation: voice-pulse 0.7s ease-in-out infinite; }
+  .voice-bars.listening .voice-bar:nth-child(1) { animation-delay: 0.00s; }
+  .voice-bars.listening .voice-bar:nth-child(2) { animation-delay: 0.10s; }
+  .voice-bars.listening .voice-bar:nth-child(3) { animation-delay: 0.20s; }
+  .voice-bars.listening .voice-bar:nth-child(4) { animation-delay: 0.15s; }
+  .voice-bars.listening .voice-bar:nth-child(5) { animation-delay: 0.05s; }
+  .voice-bars.listening .voice-bar:nth-child(6) { animation-delay: 0.25s; }
+  .voice-bars.listening .voice-bar:nth-child(7) { animation-delay: 0.12s; }
+  @keyframes voice-pulse {
+    0%, 100% { height: 4px; opacity: 0.4; }
+    50% { height: 30px; opacity: 1; }
+  }
+  .speech-transcript { font-size: 12px; color: #aaaacc; font-style: italic; min-height: 18px; text-align: center; }
+
   /* ── Camera preview ── */
   .camera-preview { display: none; margin-bottom: 10px; text-align: center; }
   .camera-preview video { width: 100%; max-width: 280px; border-radius: 10px; border: 1px solid #333344; transform: scaleX(-1); background: #0a0a10; }
@@ -261,6 +282,10 @@
     <span class="diag-key">Camera (blink activity)</span>
     <span class="diag-val" id="dCamera">—</span>
   </div>
+  <div class="diag-row">
+    <span class="diag-key">SpeechRecognition (say activity)</span>
+    <span class="diag-val" id="dSpeech">—</span>
+  </div>
 </div>
 
 <!-- Result -->
@@ -292,6 +317,7 @@
       <option value="halfturn">Half turn (180°)</option>
       <option value="jump1">Jump once</option>
       <option value="blink5" id="blink5Option" disabled>Blink 5 times (checking device…)</option>
+      <option value="say1" id="say1Option" disabled>Say a sentence (checking device…)</option>
     </select>
     <div class="row">
       <label>Timeout (seconds):</label>
@@ -301,6 +327,16 @@
 
   <!-- Session state (hidden until running) -->
   <div id="sessionState" class="hidden">
+    <div class="speech-panel" id="speechPanel">
+      <div class="speech-prompt-label">Say this sentence out loud:</div>
+      <div class="speech-prompt-text" id="speechPromptText"></div>
+      <div class="voice-bars" id="voiceBars">
+        <div class="voice-bar"></div><div class="voice-bar"></div><div class="voice-bar"></div>
+        <div class="voice-bar"></div><div class="voice-bar"></div><div class="voice-bar"></div>
+        <div class="voice-bar"></div>
+      </div>
+      <div class="speech-transcript" id="speechTranscript">Waiting…</div>
+    </div>
     <div class="camera-preview" id="blinkPreview">
       <video id="blinkVideo" playsinline muted autoplay></video>
       <div id="blinkStatus" style="font-size:11px;color:#555577;margin-top:4px;">Initialising…</div>
@@ -324,6 +360,23 @@
 </div>
 
 <script>
+// ── Speech sentences ───────────────────────────────────
+const SPEECH_SENTENCES = [
+  'Today is a beautiful sunny day',
+  'The quick brown fox jumps over the lazy dog',
+  'I am a human and I can speak clearly',
+  'Technology makes our lives easier every day',
+  'The sky is blue and the grass is green',
+  'I love exploring new places and meeting new people',
+  'Every day is a new opportunity to grow and learn',
+  'The ocean waves crash gently on the shore',
+  'Music has the power to change our mood instantly',
+  'Kindness is the language everyone understands',
+  'Hard work and dedication lead to great success',
+  'A smile is the shortest distance between two people',
+];
+const currentSpeechSentence = SPEECH_SENTENCES[Math.floor(Math.random() * SPEECH_SENTENCES.length)];
+
 // ── Activities ─────────────────────────────────────────
 const ACTIVITIES = {
   shake5:    { label: 'Shake your phone 5 times',   target: 5,   unit: 'shakes', sensors: ['motion'] },
@@ -338,6 +391,7 @@ const ACTIVITIES = {
   halfturn:  { label: 'Half turn (180°)',            target: 180, unit: '°',      sensors: ['orientation'] },
   jump1:     { label: 'Jump once',                   target: 1,   unit: 'jump',   sensors: ['motion'] },
   blink5:    { label: 'Blink 5 times',               target: 5,   unit: 'blinks', sensors: ['camera'] },
+  say1:      { label: '"' + currentSpeechSentence + '"', target: 1, unit: 'match', sensors: ['speech'] },
 };
 
 // ── State ──────────────────────────────────────────────
@@ -353,6 +407,7 @@ let jumpPhase = 'waiting', freefallStart = 0;
 let halfTurnRot = 0, halfTurnAlpha = null, halfTurnDone = false;
 let blinkCount = 0, lastBlinkTime = 0, blinkEyeOpen = true;
 let faceLandmarker = null, blinkStream = null, blinkAnimFrame = null;
+let speechRecognition = null, speechCorrect = false;
 let tiltL = false, tiltR = false, faceDown = false;
 let totalRot = 0, lastAlpha = null, rotDone = false;
 
@@ -434,6 +489,12 @@ function onActivityChange() {
                    location.hostname === 'localhost' ||
                    location.hostname === '127.0.0.1';
   const needsPerm = typeof DeviceMotionEvent?.requestPermission === 'function';
+
+  if (key === 'say1') {
+    n.innerHTML = 'ℹ Microphone will activate when you tap START. Read the sentence clearly and naturally.';
+    n.classList.add('show');
+    return;
+  }
 
   if (key === 'blink5') {
     n.innerHTML = 'ℹ Camera will open when you tap START. Grant camera permission and look at the front camera.';
@@ -528,6 +589,7 @@ async function startSession() {
   halfTurnRot = 0; halfTurnAlpha = null; halfTurnDone = false;
   blinkCount = 0; lastBlinkTime = 0; blinkEyeOpen = true;
   blinkFrameCount = 0; blinkNamesLogged = false;
+  speechCorrect = false;
   tiltL = false; tiltR = false; faceDown = false;
   totalRot = 0; lastAlpha = null; rotDone = false;
 
@@ -594,7 +656,11 @@ async function startSession() {
   }
 
   if (key === 'blink5') {
-    startBlinkSession(act.target);  // async, runs alongside countdown
+    startBlinkSession(act.target);
+  }
+
+  if (key === 'say1') {
+    startSpeechSession();
   }
 
   if (['tilt', 'facedown', 'rotate360', 'nod3', 'halfturn'].includes(key)) {
@@ -633,6 +699,7 @@ function stopSession(reason) {
   if (orientCb) { window.removeEventListener('deviceorientation', orientCb); orientCb = null; }
   if (stillInterval) { clearInterval(stillInterval); stillInterval = null; }
   stopBlinkSession();
+  stopSpeechSession();
 
   // UI: back to setup state
   $('activitySelect').disabled = false;
@@ -659,6 +726,7 @@ function stopSession(reason) {
   if (key === 'halfturn')  cur = Math.min(Math.round(halfTurnRot), 180);
   if (key === 'jump1')     cur = jumpPhase === 'done' ? 1 : 0;
   if (key === 'blink5')    cur = blinkCount;
+  if (key === 'say1')      cur = speechCorrect ? 1 : 0;
 
   const ok = reason === 'Target completed';
 
@@ -1011,9 +1079,115 @@ function stopBlinkSession() {
   if (preview) preview.classList.remove('show');
 }
 
+// ── Speech: text similarity (word overlap) ─────────────
+function textSimilarity(a, b) {
+  const norm = s => s.toLowerCase().replace(/[^a-z0-9\s]/g, '').trim().split(/\s+/).filter(Boolean);
+  const wa = norm(a), wb = norm(b);
+  const matches = wa.filter(w => wb.includes(w)).length;
+  return matches / Math.max(wa.length, wb.length);
+}
+
+// ── Speech: capability check ───────────────────────────
+function checkSpeechCapability() {
+  const opt = $('say1Option');
+  const hasSpeech = !!(window.SpeechRecognition || window.webkitSpeechRecognition);
+  const isSecure  = window.isSecureContext;
+  const capable   = hasSpeech && isSecure;
+
+  const reasons = [];
+  if (!hasSpeech) reasons.push('no SpeechRecognition API');
+  if (!isSecure)  reasons.push('needs HTTPS');
+
+  const setD = (id, text, cls) => { const el = $(id); if (el) { el.textContent = text; el.className = 'diag-val ' + cls; } };
+  setD('dSpeech', capable ? 'Supported ✓' : 'Not supported ✗ — ' + reasons.join(', '), capable ? 'ok' : 'no');
+
+  if (capable) {
+    opt.disabled = false;
+    opt.textContent = 'Say: "' + currentSpeechSentence + '"';
+  } else {
+    opt.textContent = 'Say a sentence — requires: ' + reasons.join(', ');
+  }
+}
+
+// ── Speech: start session ──────────────────────────────
+function startSpeechSession() {
+  const SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition;
+  speechRecognition = new SpeechRec();
+  speechRecognition.continuous = false;
+  speechRecognition.interimResults = true;
+  speechRecognition.lang = 'en-US';
+
+  const panel    = $('speechPanel');
+  const promptEl = $('speechPromptText');
+  const barsEl   = $('voiceBars');
+  const transEl  = $('speechTranscript');
+
+  promptEl.textContent = currentSpeechSentence;
+  panel.classList.add('show');
+
+  speechRecognition.onstart = () => {
+    barsEl.classList.add('listening');
+    transEl.textContent = 'Listening…';
+    log('Microphone active — say the sentence', 'info');
+  };
+
+  speechRecognition.onresult = (e) => {
+    const transcript = Array.from(e.results).map(r => r[0].transcript).join('');
+    const isFinal = e.results[e.results.length - 1].isFinal;
+    transEl.textContent = '"' + transcript + '"';
+
+    if (isFinal) {
+      const score = textSimilarity(transcript, currentSpeechSentence);
+      log('You said: "' + transcript + '"', 'data');
+      log('Match score: ' + (score * 100).toFixed(0) + '%', score >= 0.75 ? 'event' : 'warn');
+
+      if (score >= 0.75) {
+        speechCorrect = true;
+        setProgress(1, 1);
+        stopSession('Target completed');
+      } else {
+        log('Not close enough — try again, speak clearly', 'warn');
+        transEl.textContent = '✗ Try again: "' + transcript + '"';
+        setTimeout(() => { if (active) speechRecognition.start(); }, 600);
+      }
+    }
+  };
+
+  speechRecognition.onerror = (e) => {
+    log('Speech error: ' + e.error, 'error');
+    barsEl.classList.remove('listening');
+    if (e.error !== 'aborted' && e.error !== 'not-allowed') {
+      setTimeout(() => { if (active) speechRecognition.start(); }, 800);
+    }
+  };
+
+  speechRecognition.onend = () => {
+    barsEl.classList.remove('listening');
+    if (active && !speechCorrect) {
+      transEl.textContent = 'Tap microphone or wait — restarting…';
+      setTimeout(() => { if (active && speechRecognition) speechRecognition.start(); }, 500);
+    }
+  };
+
+  speechRecognition.start();
+}
+
+// ── Speech: cleanup ────────────────────────────────────
+function stopSpeechSession() {
+  if (speechRecognition) {
+    try { speechRecognition.abort(); } catch (e) {}
+    speechRecognition = null;
+  }
+  const panel = $('speechPanel');
+  if (panel) panel.classList.remove('show');
+  const bars = $('voiceBars');
+  if (bars) bars.classList.remove('listening');
+}
+
 // ── Run diagnostics on load ────────────────────────────
 runDiagnostics();
 checkBlinkCapability();
+checkSpeechCapability();
 </script>
 </body>
 </html>
