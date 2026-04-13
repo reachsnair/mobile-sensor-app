@@ -279,6 +279,10 @@
   </div>
   <div class="diag-body" id="diagBody">
     <div class="diag-row">
+      <span class="diag-key">Device</span>
+      <span class="diag-val" id="dDevice">—</span>
+    </div>
+    <div class="diag-row">
       <span class="diag-key">Protocol</span>
       <span class="diag-val" id="dProto">—</span>
     </div>
@@ -469,6 +473,38 @@ function setProgress(cur, total) {
   $('progNum').textContent  = cur + ' / ' + total;
 }
 
+// ── Device detection ───────────────────────────────────
+function detectDevice() {
+  const ua = navigator.userAgent;
+
+  // OS
+  let os = 'Unknown OS';
+  if (/iPhone|iPad|iPod/.test(ua))          os = /CPU OS ([\d_]+)/.test(ua) ? 'iOS ' + ua.match(/CPU OS ([\d_]+)/)[1].replace(/_/g, '.') : 'iOS';
+  else if (/Android/.test(ua))              os = /Android ([\d.]+)/.test(ua) ? 'Android ' + ua.match(/Android ([\d.]+)/)[1] : 'Android';
+  else if (/Windows NT/.test(ua))           os = 'Windows';
+  else if (/Mac OS X/.test(ua))             os = 'macOS';
+  else if (/Linux/.test(ua))                os = 'Linux';
+
+  // Device type
+  let type = 'Desktop';
+  if (/iPhone/.test(ua))                    type = 'iPhone';
+  else if (/iPad/.test(ua))                 type = 'iPad';
+  else if (/Android/.test(ua) && /Mobile/.test(ua)) type = 'Android Phone';
+  else if (/Android/.test(ua))             type = 'Android Tablet';
+
+  // Browser
+  let browser = 'Unknown';
+  if (/CriOS/.test(ua))                     browser = 'Chrome (iOS)';
+  else if (/FxiOS/.test(ua))               browser = 'Firefox (iOS)';
+  else if (/EdgA|EdgiOS/.test(ua))         browser = 'Edge';
+  else if (/OPR|Opera/.test(ua))           browser = 'Opera';
+  else if (/Chrome\/([\d.]+)/.test(ua) && !/Chromium/.test(ua)) browser = 'Chrome ' + ua.match(/Chrome\/([\d.]+)/)[1].split('.')[0];
+  else if (/Firefox\/([\d.]+)/.test(ua))   browser = 'Firefox ' + ua.match(/Firefox\/([\d.]+)/)[1].split('.')[0];
+  else if (/Safari\/([\d.]+)/.test(ua) && /Version\/([\d.]+)/.test(ua)) browser = 'Safari ' + ua.match(/Version\/([\d.]+)/)[1].split('.')[0];
+
+  return type + ' · ' + os + ' · ' + browser;
+}
+
 // ── Diagnostics on page load ───────────────────────────
 function runDiagnostics() {
   const proto    = location.protocol;
@@ -484,6 +520,7 @@ function runDiagnostics() {
     el.className = 'diag-val ' + cls;
   }
 
+  set('dDevice',  detectDevice(), 'maybe');
   set('dProto',   proto + (isSecure ? ' ✓' : ' ✗ — needs https or localhost'), isSecure ? 'ok' : 'no');
   set('dMotion',  hasMotion  ? 'Available ✓' : 'Not supported ✗', hasMotion  ? 'ok' : 'no');
   set('dOrient',  hasOrient  ? 'Available ✓' : 'Not supported ✗', hasOrient  ? 'ok' : 'no');
