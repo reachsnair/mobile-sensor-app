@@ -179,6 +179,22 @@
   }
   .perm.show { display: block; }
 
+  /* ── Diag accordion ── */
+  .diag-toggle {
+    display: flex; justify-content: space-between; align-items: center;
+    cursor: pointer; user-select: none; -webkit-user-select: none;
+  }
+  .diag-toggle .diag-chevron {
+    font-size: 10px; color: #555577;
+    transition: transform 0.25s ease;
+  }
+  .diag-body {
+    overflow: hidden;
+    max-height: 0;
+    transition: max-height 0.3s ease;
+  }
+  .diag-body.open { max-height: 400px; }
+
   /* ── Diag card ── */
   .diag-row { display: flex; justify-content: space-between; align-items: center; padding: 4px 0; border-bottom: 1px solid #1a1a28; font-size: 12px; }
   .diag-row:last-child { border-bottom: none; }
@@ -257,34 +273,39 @@
 
 <!-- Browser / sensor diagnostics -->
 <div class="card" id="diagCard">
-  <div class="card-label">Sensor diagnostics</div>
-  <div class="diag-row">
-    <span class="diag-key">Protocol</span>
-    <span class="diag-val" id="dProto">—</span>
+  <div class="diag-toggle card-label" onclick="toggleDiag()">
+    Sensor diagnostics
+    <span class="diag-chevron" id="diagChevron">▶</span>
   </div>
-  <div class="diag-row">
-    <span class="diag-key">DeviceMotionEvent</span>
-    <span class="diag-val" id="dMotion">—</span>
-  </div>
-  <div class="diag-row">
-    <span class="diag-key">DeviceOrientationEvent</span>
-    <span class="diag-val" id="dOrient">—</span>
-  </div>
-  <div class="diag-row">
-    <span class="diag-key">iOS permission required</span>
-    <span class="diag-val" id="dIOSperm">—</span>
-  </div>
-  <div class="diag-row">
-    <span class="diag-key">Sensors will work</span>
-    <span class="diag-val" id="dWill">—</span>
-  </div>
-  <div class="diag-row">
-    <span class="diag-key">Camera (blink activity)</span>
-    <span class="diag-val" id="dCamera">—</span>
-  </div>
-  <div class="diag-row">
-    <span class="diag-key">SpeechRecognition (say activity)</span>
-    <span class="diag-val" id="dSpeech">—</span>
+  <div class="diag-body" id="diagBody">
+    <div class="diag-row">
+      <span class="diag-key">Protocol</span>
+      <span class="diag-val" id="dProto">—</span>
+    </div>
+    <div class="diag-row">
+      <span class="diag-key">DeviceMotionEvent</span>
+      <span class="diag-val" id="dMotion">—</span>
+    </div>
+    <div class="diag-row">
+      <span class="diag-key">DeviceOrientationEvent</span>
+      <span class="diag-val" id="dOrient">—</span>
+    </div>
+    <div class="diag-row">
+      <span class="diag-key">iOS permission required</span>
+      <span class="diag-val" id="dIOSperm">—</span>
+    </div>
+    <div class="diag-row">
+      <span class="diag-key">Sensors will work</span>
+      <span class="diag-val" id="dWill">—</span>
+    </div>
+    <div class="diag-row">
+      <span class="diag-key">Camera (blink activity)</span>
+      <span class="diag-val" id="dCamera">—</span>
+    </div>
+    <div class="diag-row">
+      <span class="diag-key">SpeechRecognition (say activity)</span>
+      <span class="diag-val" id="dSpeech">—</span>
+    </div>
   </div>
 </div>
 
@@ -476,6 +497,14 @@ function runDiagnostics() {
       'Open this page via <code>localhost:5500</code> instead of your IP address, or set up HTTPS.';
     n.classList.add('show');
   }
+}
+
+// ── Diag accordion ────────────────────────────────────
+function toggleDiag() {
+  const body    = $('diagBody');
+  const chevron = $('diagChevron');
+  const open    = body.classList.toggle('open');
+  chevron.textContent = open ? '▼' : '▶';
 }
 
 // ── Activity change ────────────────────────────────────
