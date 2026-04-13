@@ -877,7 +877,7 @@ async function initFaceLandmarker() {
     faceLandmarker = await vision.FaceLandmarker.createFromOptions(filesetResolver, {
       baseOptions: {
         modelAssetPath: 'https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task',
-        delegate: 'GPU'
+        delegate: 'CPU'
       },
       outputFaceBlendshapes: true,
       runningMode: 'VIDEO',
@@ -924,27 +924,50 @@ function processBlinkFrame(target) {
     return;
   }
 
-  const result = faceLandmarker.detectForVideo(video, performance.now());
+  let result;
+  try {
+    result = faceLandmarker.detectForVideo(video, performance.now());
+  } catch (e) {
+    log('detectForVideo error: ' + e.message, 'error');
+    blinkAnimFrame = requestAnimationFrame(() => processBlinkFrame(target));
+    return;
+  }
+
   const statusEl = $('blinkStatus');
   blinkFrameCount++;
 
-  if (!result.faceBlendshapes || result.faceBlendshapes.length === 0) {
+  // Log raw result structure once so we can see what's coming back
+  if (blinkFrameCount === 5) {
+    log('Result keys: ' + Object.keys(result).join(', '), 'info');
+    log('faceLandmarks count: ' + (result.faceLandmarks?.length ?? 'undefined'), 'info');
+    log('faceBlendshapes count: ' + (result.faceBlendshapes?.length ?? 'undefined'), 'info');
+  }
+
+  const faceFound = result.faceLandmarks && result.faceLandmarks.length > 0;
+
+  if (!faceFound) {
     if (blinkFrameCount % 60 === 0) {
-      log('No face detected — move closer, improve lighting', 'warn');
-      if (statusEl) statusEl.textContent = 'No face detected — move closer';
+      log('No face detected (frame ' + blinkFrameCount + ')', 'warn');
+      if (statusEl) statusEl.textContent = 'No face detected — centre your face';
     }
+    blinkAnimFrame = requestAnimationFrame(() => processBlinkFrame(target));
+    return;
+  }
+
+  if (!result.faceBlendshapes || result.faceBlendshapes.length === 0) {
+    if (blinkFrameCount % 60 === 0) log('Face found but no blend shapes — check model', 'warn');
     blinkAnimFrame = requestAnimationFrame(() => processBlinkFrame(target));
     return;
   }
 
   const shapes = result.faceBlendshapes[0].categories;
 
-  // On first successful detection, log available blink-related blend shapes for debugging
+  // On first successful detection, log available eye-related blend shape names
   if (!blinkNamesLogged) {
     blinkNamesLogged = true;
     const eyeShapes = shapes.filter(s => s.categoryName.toLowerCase().includes('blink') || s.categoryName.toLowerCase().includes('eye'));
-    log('Blend shapes available: ' + eyeShapes.map(s => s.categoryName).join(', '), 'info');
-    if (statusEl) statusEl.textContent = 'Face detected ✓';
+    log('Eye blend shapes: ' + eyeShapes.map(s => s.categoryName + '=' + s.score.toFixed(2)).join(', '), 'info');
+    if (statusEl) statusEl.textContent = 'Face detected ✓ — blink slowly';
   }
 
   const leftScore  = shapes.find(s => s.categoryName === 'eyeBlinkLeft')?.score  ?? 0;
